@@ -14,13 +14,45 @@ resource "aws_cloudwatch_log_group" "payment_service" {
 ######################################################
 # EventBridge
 ######################################################
+resource "aws_cloudwatch_event_rule" "payment_service" {
+  name           = "${local.payment_service_prefix}-event-rule"
+  event_bus_name = aws_cloudwatch_event_bus.vinyl_shop.name
+  event_pattern = jsonencode(
+    {
+      "source" : ["order-service"],
+      "detail-type" : ["OrderCreated"]
+    }
+  )
+}
+
+resource "aws_cloudwatch_event_target" "payment_service" {
+  rule           = aws_cloudwatch_event_rule.payment_service.name
+  arn            = aws_sfn_state_machine.payment_service.arn
+  role_arn       = aws_iam_role.payment_service_sfn_role.arn
+  event_bus_name = aws_cloudwatch_event_bus.vinyl_shop.name
+
+  depends_on = [
+    aws_sfn_state_machine.payment_service
+  ]
+}
+
+######################################################
+# Step Function
+# Note
+#   For some reason, the logging policy for the step function needs to be set to *.
+#   If you set it to the log group arn, it will not work :/
+#   It also looks like it needs x-ray permissions to succussfully execute the TF apply.
+######################################################
 data "aws_iam_policy_document" "payment_sfn_trust" {
   statement {
     actions = ["sts:AssumeRole"]
 
     principals {
       type        = "Service"
-      identifiers = ["events.amazonaws.com"]
+      identifiers = [
+        "events.amazonaws.com",
+        "states.amazonaws.com"
+      ]
     }
   }
 }
@@ -40,10 +72,33 @@ data "aws_iam_policy_document" "payment_service_sfn" {
     effect = "Allow"
     actions = [
       "logs:CreateLogDelivery",
+      "logs:GetLogDelivery",
+      "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery",
+      "logs:ListLogDeliveries",
+      "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies",
       "logs:DescribeLogGroups"
     ]
+
     resources = [
-      "${aws_cloudwatch_log_group.payment_service.arn}:*"
+      # Is there a bug with step functions where the log group has to be *?!
+      # https://repost.aws/questions/QURc2glxBETSe3Q6Y0UwcpQg?threadID=321488
+      "*"
+      # "${aws_cloudwatch_log_group.payment_service.arn}:*"
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "xray:PutTraceSegments",
+      "xray:PutTelemetryRecords",
+      "xray:GetSamplingRules",
+      "xray:GetSamplingTargets"
+    ]
+    resources = [
+      "*"
     ]
   }
 
@@ -73,36 +128,9 @@ resource "aws_iam_role_policy_attachment" "ssm_lifecycle" {
   role       = aws_iam_role.payment_service_sfn_role.name
 }
 
-resource "aws_cloudwatch_event_rule" "payment_service" {
-  name           = "${local.payment_service_prefix}-event-rule"
-  event_bus_name = aws_cloudwatch_event_bus.vinyl_shop.name
-  event_pattern = jsonencode(
-    {
-      "source" : ["order-service"],
-      "detail-type" : ["OrderCreated"]
-    }
-  )
-}
-
-resource "aws_cloudwatch_event_target" "payment_service" {
-  rule           = aws_cloudwatch_event_rule.payment_service.name
-  arn            = aws_sfn_state_machine.payment_service.arn
-  role_arn       = aws_iam_role.payment_service_sfn_role.arn
-  event_bus_name = aws_cloudwatch_event_bus.vinyl_shop.name
-
-  depends_on = [
-    aws_sfn_state_machine.payment_service
-  ]
-}
-
-######################################################
-# Step Function
-######################################################
 resource "aws_sfn_state_machine" "payment_service" {
   name     = "${local.payment_service_prefix}-sfn-state-machine"
-  # TODO: Uncomment this line
-  # role_arn = aws_iam_role.payment_service_sfn_role.arn
-  role_arn = "arn:aws:iam::576720715620:role/service-role/StepFunctions-vinyl-shop-payment-service-sfn-state-role-83124348"
+  role_arn = aws_iam_role.payment_service_sfn_role.arn
   type     = "EXPRESS"
 
   definition = <<EOF
@@ -147,7 +175,7 @@ resource "aws_sfn_state_machine" "payment_service" {
               "id.$": "$.detail.id"
             },
             "DetailType.$": "$.payment.status",
-            "EventBusName": "vinyl-shop-event-bus",
+            "EventBusName": "${aws_cloudwatch_event_bus.vinyl_shop.name}",
             "Source": "payment-service"
           }
         ]
@@ -157,4 +185,14 @@ resource "aws_sfn_state_machine" "payment_service" {
   }
 }
 EOF
+
+  logging_configuration {
+    log_destination        = "${aws_cloudwatch_log_group.payment_service.arn}:*"
+    include_execution_data = true
+    level                  = "ALL"
+  }
+
+  depends_on = [
+    aws_iam_role.payment_service_sfn_role
+  ]
 }

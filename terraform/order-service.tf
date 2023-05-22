@@ -5,81 +5,16 @@ locals {
 
 ######################################################
 # CloudWatch Logs
+# TODO add log group for the lambda function
 ######################################################
 resource "aws_cloudwatch_log_group" "order_service" {
   name              = "/aws/lambda/${local.order_service_prefix}/logs"
   retention_in_days = 3
 }
 
-data "aws_iam_policy_document" "order_service_log_policy" {
-  statement {
-    effect = "Allow"
-    actions = [
-      "logs:CreateLogStream"
-    ]
-
-    resources = [
-      "${aws_cloudwatch_log_group.order_service.arn}:*"
-    ]
-
-    principals {
-      type = "Service"
-      identifiers = [
-        "events.amazonaws.com"
-      ]
-    }
-  }
-  statement {
-    effect = "Allow"
-    actions = [
-      "logs:PutLogEvents"
-    ]
-
-    resources = [
-      "${aws_cloudwatch_log_group.order_service.arn}:*:*"
-    ]
-
-    principals {
-      type = "Service"
-      identifiers = [
-        "events.amazonaws.com"
-      ]
-    }
-
-    condition {
-      test     = "ArnEquals"
-      values   = [aws_cloudwatch_event_rule.order_service.arn]
-      variable = "aws:SourceArn"
-    }
-  }
-}
-
-resource "aws_cloudwatch_log_resource_policy" "order_service" {
-  policy_document = data.aws_iam_policy_document.order_service_log_policy.json
-  policy_name     = "${local.order_service_prefix}-log-publishing-policy"
-}
-
 ######################################################
 # EventBridge
 ######################################################
-resource "aws_cloudwatch_event_rule" "order_service" {
-  name           = local.order_service_prefix
-  event_bus_name = aws_cloudwatch_event_bus.vinyl_shop.name
-  event_pattern = jsonencode(
-    {
-      "source" : [
-        { "exists" : true }
-      ]
-    }
-  )
-}
-
-resource "aws_cloudwatch_event_target" "order_service" {
-  rule           = aws_cloudwatch_event_rule.order_service.name
-  arn            = aws_cloudwatch_log_group.order_service.arn
-  event_bus_name = aws_cloudwatch_event_bus.vinyl_shop.name
-}
-
 resource "aws_cloudwatch_event_rule" "update_order_service" {
   name           = "${local.order_service_prefix}-update-order"
   event_bus_name = aws_cloudwatch_event_bus.vinyl_shop.name
@@ -165,7 +100,8 @@ resource "aws_api_gateway_deployment" "order_service" {
   stage_name  = "v1"
 
   depends_on = [
-    aws_api_gateway_method.order_service
+    aws_api_gateway_method.order_service,
+    aws_api_gateway_integration.order_lambda_integration
   ]
 }
 
@@ -290,7 +226,8 @@ data "aws_iam_policy_document" "order_service_lambda" {
       "dynamodb:DescribeTable",
       "dynamodb:DeleteItem",
       "dynamodb:GetItem",
-      "dynamodb:UpdateItem"
+      "dynamodb:UpdateItem",
+      "dynamodb:Query",
     ]
 
     resources = ["arn:aws:dynamodb:${var.aws_region}:${local.account_id}:table/${var.orders_table_name}"]

@@ -21,7 +21,7 @@ class Database {
             TableName: DDB_TABLE_NAME,
             KeyConditionExpression: 'id = :orderId',
             ExpressionAttributeValues: {
-                ':orderId': {N: id.toString()}
+                ':orderId': {S: id}
             },
             ScanIndexForward: false, // Sort descending
             Limit: 1 // Return only the first item

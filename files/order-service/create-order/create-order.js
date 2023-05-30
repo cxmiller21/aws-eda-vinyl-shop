@@ -19,8 +19,10 @@ exports.handler = async (event) => {
     const order = {
         id: body.id,
         amount: body.amount,
-        status: 'OrderCreated',
-        timestamp: new Date().toISOString()
+        currency: body.currency,
+        order_timestamp: body.order_timestamp,
+        items: body.items,
+        status: 'OrderCreated'
     };
 
     await database.insertOrder(order);

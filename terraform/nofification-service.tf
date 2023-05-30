@@ -2,6 +2,10 @@ locals {
   notification_service_prefix = "${var.project_name}-${var.notification_service_name}"
 }
 
+/*
+# Uncomment these resources if email notifications are needed
+# NOTE - Each event will create 3 emails so please use with caution
+
 ######################################################
 # EventBridge
 ######################################################
@@ -166,3 +170,4 @@ data "aws_iam_policy_document" "sns_order_notifications" {
     sid = "allow_owner_to_manage_sns_topic"
   }
 }
+*/

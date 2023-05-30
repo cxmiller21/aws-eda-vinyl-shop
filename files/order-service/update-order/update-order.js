@@ -32,11 +32,12 @@ exports.handler = async (event) => {
         let order =  await database.retrieveOrder(orderId);
         // update the order
         order.status = orderStatus;
-        order.timestamp = new Date().toISOString();
+        let temp_timestamp = new Date().toISOString();
+        order.processed_timestamp = temp_timestamp.slice(0, -1) + "+00:00";
 
         await database.insertOrder(order);
         await eventBus.publishOrderEvent(order);
-    };
+    }
 
     return { statusCode: 200 };
 };

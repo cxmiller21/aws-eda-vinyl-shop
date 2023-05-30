@@ -1,14 +1,21 @@
 locals {
   order_service_prefix = "${var.project_name}-${var.order_service_name}"
+  create_order_lambda_name = "${local.order_service_prefix}-create-order"
+  update_order_lambda_name = "${local.order_service_prefix}-update-order"
   lambda_iam_role_name = "${local.order_service_prefix}-lambda-role"
 }
 
 ######################################################
 # CloudWatch Logs
-# TODO add log group for the lambda function
 ######################################################
-resource "aws_cloudwatch_log_group" "order_service" {
-  name              = "/aws/lambda/${local.order_service_prefix}/logs"
+
+resource "aws_cloudwatch_log_group" "create_order_lambda" {
+  name              = "/aws/lambda/${local.create_order_lambda_name}"
+  retention_in_days = 3
+}
+
+resource "aws_cloudwatch_log_group" "update_order_lambda" {
+  name              = "/aws/lambda/${local.update_order_lambda_name}"
   retention_in_days = 3
 }
 
@@ -48,11 +55,11 @@ data "aws_iam_policy_document" "api_gw_order_service" {
       "${aws_api_gateway_rest_api.order_service.execution_arn}/*"
     ]
 
-    # condition {
-    #   test     = "IpAddress"
-    #   variable = "aws:SourceIp"
-    #   values   = ["${chomp(data.http.myip.response_body)}/32"]
-    # }
+    condition {
+      test     = "IpAddress"
+      variable = "aws:SourceIp"
+      values   = ["${chomp(data.http.myip.response_body)}/32"]
+    }
   }
 }
 
@@ -119,6 +126,10 @@ resource "aws_lambda_layer_version" "order_service" {
   filename            = "${path.module}/order_service_layer.zip"
   layer_name          = "order_service"
   compatible_runtimes = ["nodejs18.x"]
+
+  depends_on = [
+    data.archive_file.order_service_layer
+  ]
 }
 
 data "archive_file" "create_order_lambda" {
@@ -138,7 +149,7 @@ resource "aws_lambda_permission" "create_order_lambda" {
 
 resource "aws_lambda_function" "create_order" {
   filename      = "${path.module}/create_order_lambda.zip"
-  function_name = "${local.order_service_prefix}-create-order"
+  function_name = local.create_order_lambda_name
   role          = aws_iam_role.order_service_lambda_role.arn
   handler       = "create-order.handler"
   runtime       = "nodejs18.x"
@@ -158,6 +169,7 @@ resource "aws_lambda_function" "create_order" {
 
   depends_on = [
     aws_cloudwatch_event_bus.vinyl_shop,
+    aws_cloudwatch_log_group.create_order_lambda,
     aws_iam_role.order_service_lambda_role
   ]
 }
@@ -179,7 +191,7 @@ resource "aws_lambda_permission" "update_order_lambda" {
 
 resource "aws_lambda_function" "update_order" {
   filename      = "${path.module}/update_order_lambda.zip"
-  function_name = "${local.order_service_prefix}-update-order"
+  function_name = local.update_order_lambda_name
   role          = aws_iam_role.order_service_lambda_role.arn
   handler       = "update-order.handler"
   runtime       = "nodejs18.x"
@@ -199,6 +211,7 @@ resource "aws_lambda_function" "update_order" {
 
   depends_on = [
     aws_cloudwatch_event_bus.vinyl_shop,
+    aws_cloudwatch_log_group.update_order_lambda,
     aws_iam_role.order_service_lambda_role
   ]
 }
@@ -250,7 +263,22 @@ data "aws_iam_policy_document" "order_service_lambda" {
       "SNS:Publish",
     ]
 
-    resources = ["arn:aws:sns:${var.aws_region}:${local.account_id}:${local.notification_service_prefix}"]
+    resources = ["arn:aws:sns:${var.aws_region}:${local.account_id}:${local.order_service_prefix}*"]
+  }
+
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+
+    resources = [
+      "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.create_order_lambda_name}:*",
+      "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.update_order_lambda_name}:*",
+    ]
   }
 }
 
@@ -278,18 +306,18 @@ resource "aws_dynamodb_table" "vinyl_orders" {
   name         = var.orders_table_name
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "id"
-  range_key    = "timestamp"
+  range_key    = "order_timestamp"
 
   deletion_protection_enabled = false
 
   attribute {
     name = "id"
-    type = "N"
+    type = "S"
   }
 
   attribute {
-    name = "timestamp"
-    type = "S"
+    name = "order_timestamp"
+    type = "N"
   }
 
   tags = {

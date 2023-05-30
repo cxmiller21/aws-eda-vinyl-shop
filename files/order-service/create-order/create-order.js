@@ -13,7 +13,7 @@ const eventBus = new EventBus();
  * @returns {Promise<{statusCode: number}>}
  */
 exports.handler = async (event) => {
-    console.log("Received event: ", JSON.stringify(event, null, 2));
+    // console.log("Received event: ", JSON.stringify(event, null, 2));
 
     const body = JSON.parse(event.body);
     const order = {

@@ -1,3 +1,6 @@
+scripts/*.json
+*.zip*
+
 # Local .terraform directories
 **/.terraform/*
 
